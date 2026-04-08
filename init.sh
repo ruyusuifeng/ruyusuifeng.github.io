@@ -77,6 +77,8 @@ mkdir -p /opt/dns-sync
 
 cat > /opt/dns-sync/sync.sh <<'DNSSYNC'
 #!/bin/bash
+set -e
+
 ZONE_ID="06759041af48d3c9dc6c41082fe9684b"
 API_TOKEN="cfat_UjpVINzNW6cRvYe7VRjgh6Cqyy3ptgt8PmX06q3n3c87fab7"
 DOMAIN="007007.best"
@@ -84,46 +86,69 @@ RECORDS=("d1" "d2" "v3007")
 STATE_FILE="/opt/dns-sync/last_ip.txt"
 LOG_FILE="/opt/dns-sync/dns_sync.log"
 
-get_public_ip() {
-  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-    -H "X-aws-ec2-metadata-token-ttl-seconds: 300" \
-    --max-time 3 --connect-timeout 2 2>/dev/null) || TOKEN=""
+mkdir -p "$(dirname "$STATE_FILE")"
+touch "$LOG_FILE"
 
-  if [ -n "$TOKEN" ]; then
+get_public_ip() {
+  local token=""
+
+  token=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 300" \
+    --max-time 3 --connect-timeout 2 2>/dev/null || true)
+
+  if [ -n "$token" ]; then
     curl -s -L "http://169.254.169.254/latest/meta-data/public-ipv4" \
-      -H "X-aws-ec2-metadata-token: $TOKEN" \
-      --max-time 3 --connect-timeout 2 2>/dev/null
+      -H "X-aws-ec2-metadata-token: $token" \
+      --max-time 3 --connect-timeout 2 2>/dev/null || true
   else
     curl -s -L "http://169.254.169.254/latest/meta-data/public-ipv4" \
-      --max-time 3 --connect-timeout 2 2>/dev/null
+      --max-time 3 --connect-timeout 2 2>/dev/null || true
   fi
 }
 
 update_dns() {
-  local record=$1
-  local ip=$2
+  local record="$1"
+  local ip="$2"
+  local response=""
+  local record_id=""
+  local result=""
+  local success=""
+  local errors=""
 
-  RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${record}.${DOMAIN}" \
+  response=$(curl -s --fail -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${record}.${DOMAIN}" \
     -H "Authorization: Bearer $API_TOKEN" \
     -H "Content-Type: application/json" \
-    --max-time 10 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    --max-time 10)
 
-  if [ -z "$RECORD_ID" ]; then
+  record_id=$(echo "$response" | jq -r '.result[0].id // empty')
+
+  if [ -z "$record_id" ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 获取 ${record}.${DOMAIN} ID 失败" >> "$LOG_FILE"
     return 1
   fi
 
-  RESULT=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+  result=$(curl -s --fail -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$record_id" \
     -H "Authorization: Bearer $API_TOKEN" \
     -H "Content-Type: application/json" \
     --data "{\"type\":\"A\",\"name\":\"${record}.${DOMAIN}\",\"content\":\"${ip}\"}" \
     --max-time 10)
 
-  SUCCESS=$(echo "$RESULT" | grep -o '"success":[^,]*')
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${record}.${DOMAIN} -> $ip : $SUCCESS" >> "$LOG_FILE"
+  success=$(echo "$result" | jq -r '.success')
+
+  if [ "$success" != "true" ]; then
+    errors=$(echo "$result" | jq -c '.errors // []')
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${record}.${DOMAIN} -> $ip 更新失败: $errors" >> "$LOG_FILE"
+    return 1
+  fi
+
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${record}.${DOMAIN} -> $ip : success=true" >> "$LOG_FILE"
 }
 
 LAST_IP=""
+if [ -f "$STATE_FILE" ]; then
+  LAST_IP=$(tr -d '[:space:]' < "$STATE_FILE")
+fi
+
 while true; do
   CURRENT_IP=$(get_public_ip)
 
@@ -133,13 +158,20 @@ while true; do
   fi
 
   if [ "$CURRENT_IP" != "$LAST_IP" ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] IP 变化: ${LAST_IP:-'无'} -> $CURRENT_IP" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] IP 变化: ${LAST_IP:-无} -> $CURRENT_IP" >> "$LOG_FILE"
+
+    failed=0
     for record in "${RECORDS[@]}"; do
-      update_dns "$record" "$CURRENT_IP"
+      update_dns "$record" "$CURRENT_IP" || failed=1
       sleep 1
     done
-    LAST_IP="$CURRENT_IP"
-    echo "$CURRENT_IP" > "$STATE_FILE"
+
+    if [ "$failed" -eq 0 ]; then
+      LAST_IP="$CURRENT_IP"
+      echo "$CURRENT_IP" > "$STATE_FILE"
+    else
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] DNS 更新有失败，保留旧 IP: $LAST_IP" >> "$LOG_FILE"
+    fi
   fi
 
   sleep 1
@@ -147,5 +179,26 @@ done
 DNSSYNC
 
 chmod +x /opt/dns-sync/sync.sh
-nohup /opt/dns-sync/sync.sh > /dev/null 2>&1 &
-echo "[$(date)] DNS 同步服务已启动 (PID: $!)"
+
+# ---- systemd service ----
+cat > /etc/systemd/system/dns-sync.service <<EOF
+[Unit]
+Description=Cloudflare DNS Auto Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/dns-sync/sync.sh
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now dns-sync.service
+echo "[$(date)] DNS 同步服务已启用 (systemd)"
