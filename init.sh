@@ -130,7 +130,7 @@ update_dns() {
   result=$(curl -s --fail -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$record_id" \
     -H "Authorization: Bearer $API_TOKEN" \
     -H "Content-Type: application/json" \
-    --data "{\"type\":\"A\",\"name\":\"${record}.${DOMAIN}\",\"content\":\"${ip}\"}" \
+    --data "{\"type\":\"A\",\"name\":\"${record}.${DOMAIN}\",\"content\":\"${ip}\",\"ttl\":60}" \
     --max-time 10)
 
   success=$(echo "$result" | jq -r '.success')
