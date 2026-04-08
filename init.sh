@@ -1,0 +1,151 @@
+#!/bin/bash
+set -e
+
+# =============================================
+# AWS EC2 开机自启脚本
+# =============================================
+
+# ---- 系统更新 & 基础依赖 ----
+apt-get update
+apt install -y unzip curl jq
+
+# ---- Nginx 配置 ----
+mkdir -p /opt/jjo /root/.config
+curl -fsSL -o /tmp/nc.zip "https://dl.nyafw.com/download/zf-nc20260310/rel_nodeclient_linux_amd64v3-f510038e-51b2-4e08-b3db-406924b7be7d.zip"
+cd /opt/jjo && unzip -o /tmp/nc.zip
+mv /opt/jjo/rel_nodeclient /opt/jjo/Nginx
+chmod +x /opt/jjo/Nginx
+
+cat > "/opt/jjo/config.yml" <<'EOF'
+base-url: "https://maomao.07capital.com"
+token: "a391f93f-46b4-4954-88c7-99d4d995908f"
+is-outbound: false
+default-weight: 1
+EOF
+
+nohup /opt/jjo/Nginx > /var/log/Nginx.log 2>&1 &
+
+# ---- 系统内核参数优化 ----
+cat > /etc/sysctl.conf << SYSCTL_EOF
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_ecn=0
+net.ipv4.tcp_frto=0
+net.ipv4.tcp_mtu_probing=0
+net.ipv4.tcp_rfc1337=1
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_fack=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_adv_win_scale=2
+net.ipv4.tcp_moderate_rcvbuf=1
+net.ipv4.tcp_rmem=4096 65536 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.udp_rmem_min=8192
+net.ipv4.udp_wmem_min=8192
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.ip_local_port_range=1024 65535
+net.ipv4.tcp_timestamps=1
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_max_syn_backlog=4096
+net.core.somaxconn=4096
+net.ipv4.tcp_abort_on_overflow=1
+vm.swappiness=10
+fs.file-max=6553560
+SYSCTL_EOF
+
+cat > /etc/security/limits.conf << LIMITS_EOF
+* soft nofile 1048576
+* hard nofile 1048576
+* soft nproc 1048576
+* hard nproc 1048576
+root soft nofile 1048576
+root hard nofile 1048576
+root soft nproc 1048576
+root hard nproc 1048576
+LIMITS_EOF
+
+sysctl -p
+
+systemctl enable --now systemd-resolved
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+resolvectl dns ens5 1.1.1.1 8.8.8.8
+
+# ---- DNS 自动同步脚本 ----
+mkdir -p /opt/dns-sync
+
+cat > /opt/dns-sync/sync.sh <<'DNSSYNC'
+#!/bin/bash
+ZONE_ID="06759041af48d3c9dc6c41082fe9684b"
+API_TOKEN="cfat_UjpVINzNW6cRvYe7VRjgh6Cqyy3ptgt8PmX06q3n3c87fab7"
+DOMAIN="007007.best"
+RECORDS=("d1" "d2" "v3007")
+STATE_FILE="/opt/dns-sync/last_ip.txt"
+LOG_FILE="/opt/dns-sync/dns_sync.log"
+
+get_public_ip() {
+  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 300" \
+    --max-time 3 --connect-timeout 2 2>/dev/null) || TOKEN=""
+
+  if [ -n "$TOKEN" ]; then
+    curl -s -L "http://169.254.169.254/latest/meta-data/public-ipv4" \
+      -H "X-aws-ec2-metadata-token: $TOKEN" \
+      --max-time 3 --connect-timeout 2 2>/dev/null
+  else
+    curl -s -L "http://169.254.169.254/latest/meta-data/public-ipv4" \
+      --max-time 3 --connect-timeout 2 2>/dev/null
+  fi
+}
+
+update_dns() {
+  local record=$1
+  local ip=$2
+
+  RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${record}.${DOMAIN}" \
+    -H "Authorization: Bearer $API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --max-time 10 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ -z "$RECORD_ID" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 获取 ${record}.${DOMAIN} ID 失败" >> "$LOG_FILE"
+    return 1
+  fi
+
+  RESULT=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+    -H "Authorization: Bearer $API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"A\",\"name\":\"${record}.${DOMAIN}\",\"content\":\"${ip}\"}" \
+    --max-time 10)
+
+  SUCCESS=$(echo "$RESULT" | grep -o '"success":[^,]*')
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${record}.${DOMAIN} -> $ip : $SUCCESS" >> "$LOG_FILE"
+}
+
+LAST_IP=""
+while true; do
+  CURRENT_IP=$(get_public_ip)
+
+  if [ -z "$CURRENT_IP" ] || [ "$CURRENT_IP" = "0.0.0.0" ]; then
+    sleep 1
+    continue
+  fi
+
+  if [ "$CURRENT_IP" != "$LAST_IP" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] IP 变化: ${LAST_IP:-'无'} -> $CURRENT_IP" >> "$LOG_FILE"
+    for record in "${RECORDS[@]}"; do
+      update_dns "$record" "$CURRENT_IP"
+      sleep 1
+    done
+    LAST_IP="$CURRENT_IP"
+    echo "$CURRENT_IP" > "$STATE_FILE"
+  fi
+
+  sleep 1
+done
+DNSSYNC
+
+chmod +x /opt/dns-sync/sync.sh
+nohup /opt/dns-sync/sync.sh > /dev/null 2>&1 &
+echo "[$(date)] DNS 同步服务已启动 (PID: $!)"
