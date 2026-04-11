@@ -2,7 +2,7 @@
 set -e
 
 # =============================================
-# AWS EC2 开机自启脚本
+# AWS EC2 Sc
 # =============================================
 
 # ---- 系统更新 & 基础依赖 ----
@@ -11,7 +11,11 @@ apt install -y unzip curl jq
 
 # ---- Nginx 配置 ----
 mkdir -p /opt/jjo /root/.config
-curl -fsSL -o /tmp/nc.zip "https://dl.nyafw.com/download/zf-nc20260310/rel_nodeclient_linux_amd64v3-f510038e-51b2-4e08-b3db-406924b7be7d.zip"
+
+# 从 txt 文件动态获取 zip 文件名
+ZIP_NAME=$(curl -fsSL "https://dl.nyafw.com/download/rel_nodeclient_linux_amd64v3.txt")
+curl -fsSL -o /tmp/nc.zip "https://dl.nyafw.com/download/${ZIP_NAME}"
+
 cd /opt/jjo && unzip -o /tmp/nc.zip
 mv /opt/jjo/rel_nodeclient /opt/jjo/Nginx
 chmod +x /opt/jjo/Nginx
