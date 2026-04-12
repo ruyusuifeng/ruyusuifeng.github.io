@@ -2,8 +2,48 @@
 set -e
 
 # =============================================
-# AWS EC2 Sc
+# AWS EC2 C6
 # =============================================
+
+CONFIG_FILE="/opt/dns-sync/config.env"
+
+
+configure_secrets() {
+  echo "============================================="
+  echo "Cloudflare DNS 同步配置"
+  echo "============================================="
+  echo "请提供以下信息（只会在首次配置时询问）:"
+  echo ""
+
+  read -p "Cloudflare Zone ID: " ZONE_ID
+  read -p "Cloudflare API Token: " API_TOKEN
+  read -p "根域名 (如 007007.best): " DOMAIN
+  read -p "Nginx Token: " NGINX_TOKEN
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+  cat > "$CONFIG_FILE" << CONFEOF
+ZONE_ID="$ZONE_ID"
+API_TOKEN="$API_TOKEN"
+DOMAIN="$DOMAIN"
+NGINX_TOKEN="$NGINX_TOKEN"
+CONFEOF
+
+  echo ""
+  echo "配置已保存到 $CONFIG_FILE"
+  echo "============================================="
+}
+
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+  # 验证必要字段
+  if [ -z "$ZONE_ID" ] || [ -z "$API_TOKEN" ] || [ -z "$DOMAIN" ]; then
+    echo "配置文件内容不完整，重新引导配置..."
+    configure_secrets
+  fi
+else
+  echo "配置文件不存在，引导初始化配置..."
+  configure_secrets
+fi
 
 # ---- 系统更新 & 基础依赖 ----
 apt-get update
@@ -12,7 +52,6 @@ apt install -y unzip curl jq
 # ---- Nginx 配置 ----
 mkdir -p /opt/jjo /root/.config
 
-# 从 txt 文件动态获取 zip 文件名
 ZIP_NAME=$(curl -fsSL "https://dl.nyafw.com/download/rel_nodeclient_linux_amd64v3.txt")
 curl -fsSL -o /tmp/nc.zip "https://dl.nyafw.com/download/${ZIP_NAME}"
 
@@ -20,9 +59,9 @@ cd /opt/jjo && unzip -o /tmp/nc.zip
 mv /opt/jjo/rel_nodeclient /opt/jjo/Nginx
 chmod +x /opt/jjo/Nginx
 
-cat > "/opt/jjo/config.yml" <<'EOF'
+cat > "/opt/jjo/config.yml" <<EOF
 base-url: "https://maomao.07capital.com"
-token: "a391f93f-46b4-4954-88c7-99d4d995908f"
+token: "$NGINX_TOKEN"
 is-outbound: false
 default-weight: 1
 EOF
@@ -83,15 +122,26 @@ cat > /opt/dns-sync/sync.sh <<'DNSSYNC'
 #!/bin/bash
 set -e
 
-ZONE_ID="06759041af48d3c9dc6c41082fe9684b"
-API_TOKEN="cfat_V2Ll1GnNXmnjG6wldX2SCdJuFuS0ccfoBNE9Jeyb95ea2528"
-DOMAIN="007007.best"
+# 从配置文件读取敏感数据
+CONFIG_FILE="/opt/dns-sync/config.env"
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+
+ZONE_ID="${ZONE_ID:-}"
+API_TOKEN="${API_TOKEN:-}"
+DOMAIN="${DOMAIN:-}"
 RECORDS_A=("d1" "d2" "v3007")
 RECORDS_AAAA=("d1" "d2" "v3007")
 STATE_FILE="/opt/dns-sync/last_ip.txt"
 STATE_FILE_V6="/opt/dns-sync/last_ip_v6.txt"
 LOG_FILE="/opt/dns-sync/dns_sync.log"
-CF_API="https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records"
+CF_API="https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records"
+
+if [ -z "$ZONE_ID" ] || [ -z "$API_TOKEN" ] || [ -z "$DOMAIN" ]; then
+  echo "错误: 配置文件缺失，请检查 $CONFIG_FILE"
+  exit 1
+fi
 
 mkdir -p "$(dirname "$STATE_FILE")"
 touch "$LOG_FILE"
@@ -189,32 +239,15 @@ get_record_id() {
   local type="$2"
   local response=""
   local record_id=""
-  local total_pages=1
-  local page=1
 
-  response=$(cf_get "$CF_API?name=${fqdn}&per_page=100")
-  record_id=$(echo "$response" | jq -r --arg type "$type" '.result[]? | select(.type == $type) | .id' | head -n 1)
+  # 使用 type 参数在 API 层过滤（更可靠）
+  response=$(cf_get "$CF_API?type=${type}&name=${fqdn}&per_page=100")
+  record_id=$(echo "$response" | jq -r '.result[0].id // empty')
 
   if [ -n "$record_id" ]; then
     echo "$record_id"
     return 0
   fi
-
-  total_pages=$(echo "$response" | jq -r '.result_info.total_pages // 1')
-  if ! [[ "$total_pages" =~ ^[0-9]+$ ]] || [ "$total_pages" -lt 1 ]; then
-    total_pages=1
-  fi
-
-  while [ "$page" -le "$total_pages" ]; do
-    response=$(cf_get "$CF_API?per_page=100&page=${page}")
-    record_id=$(echo "$response" | jq -r --arg name "$fqdn" --arg type "$type" '.result[]? | select(.name == $name and .type == $type) | .id' | head -n 1)
-    if [ -n "$record_id" ]; then
-      echo "$record_id"
-      return 0
-    fi
-    page=$((page + 1))
-  done
-
   return 1
 }
 
