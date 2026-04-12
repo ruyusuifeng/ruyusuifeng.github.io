@@ -84,7 +84,7 @@ cat > /opt/dns-sync/sync.sh <<'DNSSYNC'
 set -e
 
 ZONE_ID="06759041af48d3c9dc6c41082fe9684b"
-API_TOKEN="cfat_UjpVINzNW6cRvYe7VRjgh6Cqyy3ptgt8PmX06q3n3c87fab7"
+API_TOKEN="cfat_V2Ll1GnNXmnjG6wldX2SCdJuFuS0ccfoBNE9Jeyb95ea2528"
 DOMAIN="007007.best"
 RECORDS_A=("d1" "d2" "v3007")
 RECORDS_AAAA=("d1" "d2" "v3007")
