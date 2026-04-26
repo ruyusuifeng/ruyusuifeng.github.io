@@ -154,8 +154,6 @@ net.ipv4.tcp_wmem = 4096 65536 134217728
 EOF
 
 cat >>/etc/sysctl.conf <<'EOF'
-
-Forward entry optimize
 net.core.somaxconn = 65535
 net.core.netdev_max_backlog = 250000
 net.core.rmem_max = 134217728
