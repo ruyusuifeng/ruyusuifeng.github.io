@@ -128,36 +128,74 @@ EOF
 
 # nohup /opt/jjo/Nginx > /var/log/Nginx.log 2>&1 &
 S=box bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_nodeclient "-t a391f93f-46b4-4954-88c7-99d4d995908f -u https://maomao.07capital.com"
-sudo ip link set dev ens5 mtu 1400
+sudo ip link set dev ens5 mtu 1492
 
-cat > /etc/sysctl.conf <<'SYSCTL_EOF'
-net.ipv4.tcp_no_metrics_save=1
-net.ipv4.tcp_ecn=0
-net.ipv4.tcp_frto=0
-net.ipv4.tcp_mtu_probing=0
-net.ipv4.tcp_rfc1337=1
-net.ipv4.tcp_sack=1
-net.ipv4.tcp_fack=1
-net.ipv4.tcp_window_scaling=1
-net.ipv4.tcp_adv_win_scale=2
-net.ipv4.tcp_moderate_rcvbuf=1
-net.ipv4.tcp_rmem=4096 65536 16777216
-net.ipv4.tcp_wmem=4096 65536 16777216
-net.core.rmem_max=16777216
-net.core.wmem_max=16777216
-net.ipv4.udp_rmem_min=8192
-net.ipv4.udp_wmem_min=8192
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.ip_local_port_range=1024 65535
-net.ipv4.tcp_timestamps=1
-net.ipv4.tcp_tw_reuse=1
-net.ipv4.tcp_max_syn_backlog=4096
-net.core.somaxconn=4096
-net.ipv4.tcp_abort_on_overflow=1
-vm.swappiness=10
-fs.file-max=6553560
-SYSCTL_EOF
+IFACE=$(ip route show default | awk '{print $5; exit}')
+
+cat >/etc/sysctl.d/zz-forward-entry-optimize.conf <<'EOF'
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 250000
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.default_qdisc = fq
+
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_max_syn_backlog = 65535
+net.ipv4.tcp_abort_on_overflow = 0
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_base_mss = 1024
+net.ipv4.tcp_max_orphans = 262144
+net.ipv4.tcp_max_tw_buckets = 262144
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 10000 65535
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+EOF
+
+cat >>/etc/sysctl.conf <<'EOF'
+
+Forward entry optimize
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 250000
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_max_syn_backlog = 65535
+net.ipv4.tcp_abort_on_overflow = 0
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_base_mss = 1024
+net.ipv4.tcp_max_orphans = 262144
+net.ipv4.tcp_max_tw_buckets = 262144
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 10000 65535
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+EOF
+
+sysctl --system || true
+sysctl -p /etc/sysctl.conf || true
+
+tc qdisc replace dev "$IFACE" root fq || true
+
+cat >/etc/systemd/system/forward-entry-qdisc.service <<EOF
+[Unit]
+Description=Persist fq qdisc
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/tc qdisc replace dev $IFACE root fq
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now forward-entry-qdisc.service || true
 
 cat > /etc/security/limits.conf <<'LIMITS_EOF'
 * soft nofile 1048576
