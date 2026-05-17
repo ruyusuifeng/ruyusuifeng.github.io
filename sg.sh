@@ -71,39 +71,6 @@ S=box bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_n
 sudo ip link set dev ens5 mtu 1492
 
 
-# ---- 系统内核参数优化 ----
-wget -N --no-check-certificate "https://github.000060000.xyz/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh op0
-sed -i '/tcp_congestion_control/d; /default_qdisc/d' /etc/sysctl.d/99-sysctl.conf
-echo -e "net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.d/99-sysctl.conf
-sed -i 's/tcp_max_tw_buckets = 5000/tcp_max_tw_buckets = 60000/' /etc/sysctl.d/99-sysctl.conf
-sysctl --system
-
-rm -f /etc/dnsmasq.d/*
-
-echo "
-listen-address=127.0.53.53
-bind-interfaces
-
-no-resolv
-
-strict-order
-cache-size=1000
-
-server=1.1.1.1
-server=8.8.8.8
-server=2606:4700:4700::1111
-server=2001:4860:4860::8888
-" > /etc/dnsmasq.d/my.conf
-
-systemctl restart dnsmasq
-
-chattr -i /etc/resolv.conf
-rm -f /etc/resolv.conf
-echo "nameserver 127.0.53.53" > /etc/resolv.conf
-chattr +i /etc/resolv.conf
-
-
-
 # ---- DNS 自动同步脚本 ----
 mkdir -p /opt/dns-sync
 
@@ -374,3 +341,37 @@ EOF
 systemctl daemon-reload
 systemctl enable --now dns-sync.service
 echo "[$(date)] DNS 同步服务已启用 (systemd)"
+
+
+
+# ---- 系统内核参数优化 ----
+wget -N --no-check-certificate "https://github.000060000.xyz/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh op0
+sed -i '/tcp_congestion_control/d; /default_qdisc/d' /etc/sysctl.d/99-sysctl.conf
+echo -e "net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.d/99-sysctl.conf
+sed -i 's/tcp_max_tw_buckets = 5000/tcp_max_tw_buckets = 60000/' /etc/sysctl.d/99-sysctl.conf
+sysctl --system
+
+rm -f /etc/dnsmasq.d/*
+
+echo "
+listen-address=127.0.53.53
+bind-interfaces
+
+no-resolv
+
+strict-order
+cache-size=1000
+
+server=1.1.1.1
+server=8.8.8.8
+server=2606:4700:4700::1111
+server=2001:4860:4860::8888
+" > /etc/dnsmasq.d/my.conf
+
+systemctl restart dnsmasq
+
+chattr -i /etc/resolv.conf
+rm -f /etc/resolv.conf
+echo "nameserver 127.0.53.53" > /etc/resolv.conf
+chattr +i /etc/resolv.conf
+
