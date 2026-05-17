@@ -47,7 +47,7 @@ fi
 
 # ---- 系统更新 & 基础依赖 ----
 apt-get update
-apt install -y unzip curl jq
+apt install -y unzip curl jq dnsmasq dnsutils
 
 # ---- Nginx 配置 ----
 mkdir -p /opt/jjo /root/.config
@@ -71,51 +71,38 @@ S=box bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_n
 sudo ip link set dev ens5 mtu 1492
 
 # ---- 系统内核参数优化 ----
-cat > /etc/sysctl.conf << SYSCTL_EOF
-net.ipv4.tcp_no_metrics_save=1
-net.ipv4.tcp_ecn=0
-net.ipv4.tcp_frto=0
-net.ipv4.tcp_mtu_probing=0
-net.ipv4.tcp_rfc1337=1
-net.ipv4.tcp_sack=1
-net.ipv4.tcp_fack=1
-net.ipv4.tcp_window_scaling=1
-net.ipv4.tcp_adv_win_scale=2
-net.ipv4.tcp_moderate_rcvbuf=1
-net.ipv4.tcp_rmem=4096 65536 16777216
-net.ipv4.tcp_wmem=4096 65536 16777216
-net.core.rmem_max=16777216
-net.core.wmem_max=16777216
-net.ipv4.udp_rmem_min=8192
-net.ipv4.udp_wmem_min=8192
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.ip_local_port_range=1024 65535
-net.ipv4.tcp_timestamps=1
-net.ipv4.tcp_tw_reuse=1
-net.ipv4.tcp_max_syn_backlog=4096
-net.core.somaxconn=4096
-net.ipv4.tcp_abort_on_overflow=1
-vm.swappiness=10
-fs.file-max=6553560
-SYSCTL_EOF
+wget -N --no-check-certificate "https://github.000060000.xyz/tcpx.sh" && chmod +x tcpx.sh && ./tcpx.sh op0
+sed -i '/tcp_congestion_control/d; /default_qdisc/d' /etc/sysctl.d/99-sysctl.conf
+echo -e "net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.d/99-sysctl.conf
+sed -i 's/tcp_max_tw_buckets = 5000/tcp_max_tw_buckets = 60000/' /etc/sysctl.d/99-sysctl.conf
+sysctl --system
 
-cat > /etc/security/limits.conf << LIMITS_EOF
-* soft nofile 1048576
-* hard nofile 1048576
-* soft nproc 1048576
-* hard nproc 1048576
-root soft nofile 1048576
-root hard nofile 1048576
-root soft nproc 1048576
-root hard nproc 1048576
-LIMITS_EOF
+rm -f /etc/dnsmasq.d/*
 
-sysctl -p
+echo "
+listen-address=127.0.53.53
+bind-interfaces
 
-systemctl enable --now systemd-resolved
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-resolvectl dns ens5 1.1.1.1 8.8.8.8
+no-resolv
+
+strict-order
+cache-size=1000
+
+server=1.1.1.1
+server=8.8.8.8
+server=2606:4700:4700::1111
+server=2001:4860:4860::8888
+" > /etc/dnsmasq.d/my.conf
+
+systemctl restart dnsmasq
+
+chattr -i /etc/resolv.conf
+rm -f /etc/resolv.conf
+echo "nameserver 127.0.53.53" > /etc/resolv.conf
+chattr +i /etc/resolv.conf
+
+
+
 
 # ---- DNS 自动同步脚本 ----
 mkdir -p /opt/dns-sync
