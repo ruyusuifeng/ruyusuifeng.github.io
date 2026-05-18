@@ -68,7 +68,7 @@ EOF
 
 # nohup /opt/jjo/Nginx > /var/log/Nginx.log 2>&1 &
 S=box bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_nodeclient "-t a391f93f-46b4-4954-88c7-99d4d995908f -u https://maomao.07capital.com"
-sudo ip link set dev ens5 mtu 1492
+sudo ip link set dev ens5 mtu 1400
 
 
 
