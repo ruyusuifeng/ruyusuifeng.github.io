@@ -349,6 +349,13 @@ wget -N --no-check-certificate "https://github.000060000.xyz/tcpx.sh" && chmod +
 sed -i '/tcp_congestion_control/d; /default_qdisc/d' /etc/sysctl.d/99-sysctl.conf
 echo -e "net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.d/99-sysctl.conf
 sed -i 's/tcp_max_tw_buckets = 5000/tcp_max_tw_buckets = 60000/' /etc/sysctl.d/99-sysctl.conf
+# 等价于菜单 20
+cat >> /etc/sysctl.conf <<EOF
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+EOF
+sysctl -p
+# 改 21/22 把 fq 换成 fq_pie 或 cake 即可
 sysctl --system
 
 rm -f /etc/dnsmasq.d/*
