@@ -70,6 +70,9 @@ EOF
 S=box bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_nodeclient "-t a391f93f-46b4-4954-88c7-99d4d995908f -u https://maomao.07capital.com"
 sudo ip link set dev ens5 mtu 1400
 
+S=ck bash <(curl -fLSs https://dl.nyafw.com/download/nyanpass-install.sh) rel_nodeclient "-o -t 234a4034-548b-4c4c-b869-7cb3732b027a -u https://maomao.07capital.com"
+
+
 
 # ---- DNS 自动同步脚本 ----
 mkdir -p /opt/dns-sync
