@@ -89,8 +89,8 @@ fi
 ZONE_ID="${ZONE_ID:-}"
 API_TOKEN="${API_TOKEN:-}"
 DOMAIN="${DOMAIN:-}"
-RECORDS_A=("d1" "d2" "v3007")
-RECORDS_AAAA=("v6.d1" "v6.d2" "v6.v3007" "d2")
+RECORDS_A=("d1")
+RECORDS_AAAA=("v6.d1")
 STATE_FILE="/opt/dns-sync/last_ip.txt"
 STATE_FILE_V6="/opt/dns-sync/last_ip_v6.txt"
 LOG_FILE="/opt/dns-sync/dns_sync.log"
